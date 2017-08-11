@@ -105,6 +105,12 @@
 				</exclusion>
 			</exclusions>
 		</dependency>
+		<!--shiro cas-->
+		<dependency>
+			<groupId>org.apache.shiro</groupId>
+			<artifactId>shiro-cas</artifactId>
+			<version>RELEASE</version>
+		</dependency>
 	</dependencies>
 
 	<build>

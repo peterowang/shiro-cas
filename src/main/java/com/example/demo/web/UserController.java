@@ -18,8 +18,6 @@ public class UserController {
      * @return
      */
     @RequestMapping("/userList")
-    @RequiresPermissions({"userinfo:view"})
-    @RequiresRoles({"wangjing"})
     public String userInfo(){
         return "userInfo";
     }
@@ -29,7 +27,6 @@ public class UserController {
      * @return
      */
     @RequestMapping("/userAdd")
-    @RequiresPermissions({"userinfo:view","userinfo:add"})
     public String userInfoAdd(){
         return "userAdd";
     }
@@ -38,7 +35,6 @@ public class UserController {
      * 要删除必须有查看和删除权限
      * @return
      */
-    @RequiresPermissions({"userinfo:view","userinfo:del"})
     @RequestMapping("/userDel")
     public String userInfoDel() {
         return "userDel";

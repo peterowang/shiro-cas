@@ -1,15 +1,15 @@
 package com.example.demo.web;
 
-import com.example.demo.config.ExceptionResolver.IncorrectCaptchaException;
-import org.apache.shiro.authc.IncorrectCredentialsException;
-import org.apache.shiro.authc.UnknownAccountException;
+import com.example.demo.config.shiro.ShiroConfiguration;
+import com.example.demo.model.UserInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
 
-import javax.servlet.http.HttpServletRequest;
-import java.util.Map;
+import javax.servlet.http.HttpSession;
 
 /**
  * Created by BFD-593 on 2017/8/8.
@@ -21,34 +21,25 @@ public class HomeController {
     public String index() {
         return "index";
     }
-
-
+    @RequestMapping(value="/login",method= RequestMethod.GET)
+    public String loginForm(Model model){
+//      return "login";
+        return "redirect:" + ShiroConfiguration.loginUrl;
+    }
     /**
-     * 因为设置了setLoginUrl("/login");登录url如果没有登录，
-     * 所有的请求都发送到这里。shiro会自动调用securityManager
-     * 此方法不处理登录成功,由shiro进行处理。
-     * @param request
-     * @param map
+     * shiroFilterFactoryBean.setLoginUrl(loginUrl);我们设置了登录地址，但没设置logout,
+     * 所以加一个logout的请求，转到cas的logout上
+     * @param session
      * @return
-     * @throws Exception
      */
-    @RequestMapping("/login")
-    public String login(HttpServletRequest request, Map<String, Object> map) throws Exception {
-        // 登录失败从request中获取shiro处理的异常信息。
-        // shiroLoginFailure:就是shiro异常类的全类名.
-        Object obj = request.getAttribute("shiroLoginFailure");
-        log.info("异常信息:"+obj);
-        String error = null;
-        if( UnknownAccountException.class.isInstance(obj)) {
-            error = "用户名/密码错误";
-        } else if(IncorrectCredentialsException.class.isInstance(obj)) {
-            error = "用户名/密码错误";
-        } else if(IncorrectCaptchaException.class.isInstance(obj)){
-            error = "验证码错误";
-        } else if(obj!=null) {
-            error = "其他错误：" + obj;
-        }
-        map.put("msg", error);
-        return "login";
+    @RequestMapping(value = "logout", method = { RequestMethod.GET,
+            RequestMethod.POST })
+    public String loginout()
+    {
+        return "redirect:"+ShiroConfiguration.logoutUrl;
+    }
+    @RequestMapping("/403")
+    public String fail(){
+            return "403";
     }
 }

@@ -1,21 +1,27 @@
 package com.example.demo.config.shiro;
 
-import at.pollux.thymeleaf.shiro.dialect.ShiroDialect;
-import com.example.demo.filter.KaptchaFilter;
 import org.apache.shiro.cache.ehcache.EhCacheManager;
-import org.apache.shiro.codec.Base64;
-import org.apache.shiro.mgt.SecurityManager;
+import org.apache.shiro.cas.CasFilter;
+import org.apache.shiro.cas.CasSubjectFactory;
+import org.apache.shiro.spring.LifecycleBeanPostProcessor;
 import org.apache.shiro.spring.security.interceptor.AuthorizationAttributeSourceAdvisor;
 import org.apache.shiro.spring.web.ShiroFilterFactoryBean;
-import org.apache.shiro.web.mgt.CookieRememberMeManager;
 import org.apache.shiro.web.mgt.DefaultWebSecurityManager;
-import org.apache.shiro.web.servlet.SimpleCookie;
+import org.jasig.cas.client.session.SingleSignOutFilter;
+import org.jasig.cas.client.session.SingleSignOutHttpSessionListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.aop.framework.autoproxy.DefaultAdvisorAutoProxyCreator;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.boot.web.servlet.ServletListenerRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.filter.DelegatingFilterProxy;
 import org.springframework.web.servlet.handler.SimpleMappingExceptionResolver;
 
 import javax.servlet.Filter;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
@@ -26,153 +32,209 @@ import java.util.Properties;
  */
 @Configuration
 public class ShiroConfiguration {
-    @Bean(name="shiroFilter")
-    public ShiroFilterFactoryBean shiroFilterFactoryBean(@Qualifier("securityManager") SecurityManager manager) {
-        //设置shiro安全管理框架
-        ShiroFilterFactoryBean shiroFilterFactoryBean = new ShiroFilterFactoryBean();
-        shiroFilterFactoryBean.setSecurityManager(manager);
-        //将我们自己的拦截器注入到shiro中
-        Map<String, Filter> filterMap = shiroFilterFactoryBean.getFilters();//先获取shiro内部拦截器
-        KaptchaFilter kaptchaFilter = new KaptchaFilter();//初始化自己的拦截器
-        filterMap.put("kaptchaFilter", kaptchaFilter);//加入我们的拦截器
-        shiroFilterFactoryBean.setFilters(filterMap);//注入
+    private static final Logger logger = LoggerFactory.getLogger(ShiroConfiguration.class);
+    // cas server地址
+    public static final String casServerUrlPrefix = "https://localhost:8443/cas";
+    // Cas登录页面地址
+    public static final String casLoginUrl = casServerUrlPrefix + "/login";
+    // Cas登出页面地址
+    public static final String casLogoutUrl = casServerUrlPrefix + "/logout";
+    // 当前工程对外提供的服务地址
+    public static final String shiroServerUrlPrefix = "http://localhost:8089";
+    // casFilter UrlPattern
+    public static final String casFilterUrlPattern = "/cas";
+    // 登录地址
+    public static final String loginUrl = casLoginUrl + "?service=" + shiroServerUrlPrefix + casFilterUrlPattern;
+    // 登出地址（casserver启用service跳转功能，需在webapps\cas\WEB-INF\cas.properties文件中启用cas.logout.followServiceRedirects=true）
+    public static final String logoutUrl = casLogoutUrl+"?service="+shiroServerUrlPrefix;
+    // 登录成功地址
+    public static final String loginSuccessUrl = "/index";
+    // 权限认证失败跳转地址
+    public static final String unauthorizedUrl = "/403";
+        @Bean
+        public EhCacheManager getEhCacheManager() {
+            EhCacheManager em = new EhCacheManager();
+            em.setCacheManagerConfigFile("classpath:config/ehcache-shiro.xml");
+            return em;
+        }
 
-        //配置记住我或认证通过可以访问的地址
-        Map<String, String> filterChainDefinitionMap = new LinkedHashMap<>();
-        filterChainDefinitionMap.put("/", "user");
-        filterChainDefinitionMap.put("/index", "user");
-        /** authc：该过滤器下的页面必须验证后才能访问，它是Shiro内置的一个拦截器
-         * org.apache.shiro.web.filter.authc.FormAuthenticationFilter */
-        // anon：它对应的过滤器里面是空的,什么都没做,可以理解为不拦截
-        filterChainDefinitionMap.put("/logout", "logout");
-        filterChainDefinitionMap.put("/favicon.ico", "anon");
-        filterChainDefinitionMap.put("/static/**", "anon");
+        @Bean(name = "myShiroCasRealm")
+        public MyShiroCasRealm myShiroCasRealm(EhCacheManager cacheManager) {
+            MyShiroCasRealm realm = new MyShiroCasRealm();
+            realm.setCacheManager(cacheManager);
+            return realm;
+        }
 
-        filterChainDefinitionMap.put("/login", "kaptchaFilter");//设置登录时使用kaptchaFilter我们自己的拦截器
-        filterChainDefinitionMap.put("/kaptcha.jpg", "anon");//图片验证码(kaptcha框架,会访问localhost:8080/kaptcha.jpg来自动生成验证码)
+        /**
+         * 注册单点登出listener
+         * @return
+         */
+        @Bean
+        public ServletListenerRegistrationBean singleSignOutHttpSessionListener(){
+            ServletListenerRegistrationBean bean = new ServletListenerRegistrationBean();
+            bean.setListener(new SingleSignOutHttpSessionListener());
+            bean.setEnabled(true);
+            return bean;
+        }
 
-        filterChainDefinitionMap.put("/**", "authc");
-        //authc表示需要验证身份才能访问，还有一些比如anon表示不需要验证身份就能访问等。
-        //关于为什么设置filterChainDefinitionMap.put("/favicon.ico", "anon");，请参考Shiro登录后下载favicon.ico问题
+        /**
+         * 注册单点登出filter
+         * @return
+         */
+        @Bean
+        public FilterRegistrationBean singleSignOutFilter(){
+            FilterRegistrationBean bean = new FilterRegistrationBean();
+            bean.setName("singleSignOutFilter");
+            bean.setFilter(new SingleSignOutFilter());
+            bean.addUrlPatterns("/*");
+            bean.setEnabled(true);
+            return bean;
+        }
 
-        shiroFilterFactoryBean.setLoginUrl("/login");//登录url
-        shiroFilterFactoryBean.setSuccessUrl("/index");//登录成功后跳转的页面
-
-        shiroFilterFactoryBean.setFilterChainDefinitionMap(filterChainDefinitionMap);
-        return shiroFilterFactoryBean;
-    }
 
 
-    /**
-     * 不指定名字的话，自动创建一个方法名第一个字母小写的bean
-     * @Bean(name = "securityManager")
-     * @return
-     */
-    @Bean(name="securityManager")
-    public SecurityManager securityManager(@Qualifier("authRealm") MyShiroRealm authRealm,
-                                           @Qualifier("ehCacheManager") EhCacheManager ehCacheManager) {
-        DefaultWebSecurityManager securityManager = new DefaultWebSecurityManager();
-        securityManager.setRealm(authRealm);
-        securityManager.setCacheManager(ehCacheManager);//注入缓存对象,防止每访问一个带权限的请求都要shiro去查询数据库的权限
-        securityManager.setRememberMeManager(rememberMeManager()); //注入记住我cookie管理器(记住密码)
-        return securityManager;
-    }
+        /**
+         * 注册DelegatingFilterProxy（Shiro）
+         */
+        @Bean
+        public FilterRegistrationBean delegatingFilterProxy() {
+            FilterRegistrationBean filterRegistration = new FilterRegistrationBean();
+            filterRegistration.setFilter(new DelegatingFilterProxy("shiroFilter"));
+            //  该值缺省为false,表示生命周期由SpringApplicationContext管理,设置为true则表示由ServletContainer管理
+            filterRegistration.addInitParameter("targetFilterLifecycle", "true");
+            filterRegistration.setEnabled(true);
+            filterRegistration.addUrlPatterns("/*");
+            return filterRegistration;
+        }
 
-    /**
-     * Shiro Realm 继承自AuthorizingRealm的自定义Realm,即指定Shiro验证用户登录的类为自定义的
-     *
-     * @param
-     * @return
-     */
-    @Bean(name="authRealm")
-    public MyShiroRealm userRealm(@Qualifier("credentialsMatcher") CredentialsMatcher matcher) {
-        MyShiroRealm userRealm = new MyShiroRealm();
-        //告诉realm,使用credentialsMatcher加密算法类来验证密文
-        userRealm.setCredentialsMatcher(matcher);
-        return userRealm;
-    }
 
-    /**
-     * 密码比较器
-     * @return
-     */
-    @Bean(name="credentialsMatcher")
-    public CredentialsMatcher credentialsMatcher() {
-        return new CredentialsMatcher();
-    }
+        @Bean(name = "lifecycleBeanPostProcessor")
+        public LifecycleBeanPostProcessor getLifecycleBeanPostProcessor() {
+            return new LifecycleBeanPostProcessor();
+        }
 
-    /**
-     * 权限认证
-     * 需要开启Shiro AOP注解支持
-     * @RequiresPermissions({"userinfo:view"})
-     * @RequiresRoles({"wangjing"})等注解的支持
-     * @param securityManager
-     * @return
-     */
-    @Bean
-    public AuthorizationAttributeSourceAdvisor authorizationAttributeSourceAdvisor(SecurityManager securityManager){
-        AuthorizationAttributeSourceAdvisor authorizationAttributeSourceAdvisor = new AuthorizationAttributeSourceAdvisor();
-        authorizationAttributeSourceAdvisor.setSecurityManager(securityManager);
-        return authorizationAttributeSourceAdvisor;
-    }
+        @Bean
+        public DefaultAdvisorAutoProxyCreator getDefaultAdvisorAutoProxyCreator() {
+            DefaultAdvisorAutoProxyCreator daap = new DefaultAdvisorAutoProxyCreator();
+            daap.setProxyTargetClass(true);
+            return daap;
+        }
 
-    /**
-     * 当用户无权限访问403页面而不抛异常，默认shiro会报UnauthorizedException异常
-     * @return
-     */
-    @Bean
-    public SimpleMappingExceptionResolver resolver() {
-        SimpleMappingExceptionResolver resolver = new SimpleMappingExceptionResolver();
-        Properties properties = new Properties();
-        properties.setProperty("org.apache.shiro.authz.UnauthorizedException", "/403");
-        resolver.setExceptionMappings(properties);
-        return resolver;
-    }
+        @Bean(name = "securityManager")
+        public DefaultWebSecurityManager getDefaultWebSecurityManager(@Qualifier("myShiroCasRealm") MyShiroCasRealm myShiroCasRealm) {
+            DefaultWebSecurityManager dwsm = new DefaultWebSecurityManager();
+            dwsm.setRealm(myShiroCasRealm);
+            //用户授权/认证信息Cache, 采用EhCache 缓存
+            dwsm.setCacheManager(getEhCacheManager());
+            // 指定 SubjectFactory
+            dwsm.setSubjectFactory(new CasSubjectFactory());
+            return dwsm;
+        }
 
-    /**
-     * 整合thymeleaf中可以使用shiro标签
-     * @return
-     */
-    @Bean
-    public ShiroDialect shiroDialect() {
-        return new ShiroDialect();
-    }
 
-    /**
-     * shiro缓存对象，防止当每次访问带权限的请求时，shiro都去执行权限认证，进行查询权限
-     * 也就是说，只需给shiro一次权限即可（缓存），不需要每次查询权限
-     * @return
-     */
-    @Bean(name="ehCacheManager")
-    public EhCacheManager ehCacheManager() {
-        EhCacheManager ehCacheManager = new EhCacheManager();
-        ehCacheManager.setCacheManagerConfigFile("classpath:config/ehcache-shiro.xml");
-        return ehCacheManager;
-    }
-    /**
-     * cookie对象;
-     * rememberMeCookie()方法是设置Cookie的生成模版，比如cookie的name，cookie的有效时间等等。
-     * @return
-     */
-    @Bean
-    public SimpleCookie rememberMeCookie(){
-        //这个参数是cookie的名称，对应前端的checkbox的name = rememberMe
-        SimpleCookie simpleCookie = new SimpleCookie("rememberMe");
-        //<!-- 记住我cookie生效时间30天 ,单位秒;-->
-        simpleCookie.setMaxAge(259200);
-        return simpleCookie;
-    }
-    /**
-     * cookie管理对象;
-     * rememberMeManager()方法是生成rememberMe管理器，而且要将这个rememberMe管理器设置到securityManager中
-     * @return
-     */
-    @Bean
-    public CookieRememberMeManager rememberMeManager(){
-        CookieRememberMeManager cookieRememberMeManager = new CookieRememberMeManager();
-        cookieRememberMeManager.setCookie(rememberMeCookie());
-        //rememberMe cookie加密的密钥 建议每个项目都不一样 默认AES算法 密钥长度(128 256 512 位)
-        cookieRememberMeManager.setCipherKey(Base64.decode("2AvVhdsgUs0FSA3SDFAdag=="));
-        return cookieRememberMeManager;
-    }
+
+        /**
+         * CAS过滤器
+         *
+         * @return
+         */
+        @Bean(name = "casFilter")
+        public CasFilter getCasFilter() {
+            CasFilter casFilter = new CasFilter();
+            casFilter.setName("casFilter");
+            casFilter.setEnabled(true);
+            // 登录失败后跳转的URL，也就是 Shiro 执行 CasRealm 的 doGetAuthenticationInfo 方法向CasServer验证tiket
+            casFilter.setFailureUrl(loginUrl);// 我们选择认证失败后再打开登录页面
+            return casFilter;
+        }
+
+        /**
+         * ShiroFilter
+         * @param securityManager
+         * @param casFilter
+         * @return
+         */
+        @Bean(name = "shiroFilter")
+        public ShiroFilterFactoryBean getShiroFilterFactoryBean(@Qualifier("securityManager") DefaultWebSecurityManager securityManager,
+                                                                @Qualifier("casFilter") CasFilter casFilter) {
+            ShiroFilterFactoryBean shiroFilterFactoryBean = new ShiroFilterFactoryBean();
+            // 必须设置 SecurityManager
+            shiroFilterFactoryBean.setSecurityManager(securityManager);
+            // 如果不设置默认会自动寻找Web工程根目录下的"/login.jsp"页面
+            shiroFilterFactoryBean.setLoginUrl(loginUrl);
+            // 登录成功后要跳转的连接
+            shiroFilterFactoryBean.setSuccessUrl(loginSuccessUrl);
+            shiroFilterFactoryBean.setUnauthorizedUrl(unauthorizedUrl);
+            // 添加casFilter到shiroFilter中
+            Map<String, Filter> filters = new HashMap<>();
+            filters.put("casFilter", casFilter);
+            shiroFilterFactoryBean.setFilters(filters);
+
+            loadShiroFilterChain(shiroFilterFactoryBean);
+            return shiroFilterFactoryBean;
+        }
+
+        /**
+         * 加载shiroFilter权限控制规则（从数据库读取然后配置）,角色/权限信息由MyShiroCasRealm对象提供doGetAuthorizationInfo实现获取来的
+         */
+        private void loadShiroFilterChain(@Qualifier("shiroFilter") ShiroFilterFactoryBean shiroFilterFactoryBean){
+            /////////////////////// 下面这些规则配置最好配置到配置文件中 ///////////////////////
+            Map<String, String> filterChainDefinitionMap = new LinkedHashMap<String, String>();
+
+            // authc：该过滤器下的页面必须登录后才能访问，它是Shiro内置的一个拦截器org.apache.shiro.web.filter.authc.FormAuthenticationFilter
+            // anon: 可以理解为不拦截
+            // user: 登录了就不拦截
+            // roles["admin"] 用户拥有admin角色
+            // perms["permission1"] 用户拥有permission1权限
+            // filter顺序按照定义顺序匹配，匹配到就验证，验证完毕结束。
+            // url匹配通配符支持：? * **,分别表示匹配1个，匹配0-n个（不含子路径），匹配下级所有路径
+
+            //1.shiro集成cas后，首先添加该规则
+            filterChainDefinitionMap.put(casFilterUrlPattern, "casFilter");
+
+            //2.不拦截的请求
+            filterChainDefinitionMap.put("/css/**","anon");
+            filterChainDefinitionMap.put("/login", "anon");
+            filterChainDefinitionMap.put("/logout","anon");
+            filterChainDefinitionMap.put("/error","anon");
+
+            //3.拦截的请求,并且拥有哪些权限才可以访问,当没有权限时
+            //  我们通过在shiroFilter里设置 shiroFilterFactoryBean.setUnauthorizedUrl(unauthorizedUrl);
+            //  让其跳转到403页面,需要加403的controller请求哦
+            //  这里还可以通过另一种方式,就是在controller的需要的请求上,加shiro的权限注解
+            //  如果通过注解的方式,则需要通过以下两个配置bean来分别设置支持shiro注解和无权限跳转的页面
+            filterChainDefinitionMap.put("/userinfo/userList", "authc,perms[\"userinfo:view\"],roles[\"wangjing\"]"); //需要登录，且用户有权限为userinfo:view并且角色为wangjing
+            filterChainDefinitionMap.put("/userinfo/userDel", "authc,perms[\"userinfo:view\"],roles[\"admin\"]");
+            filterChainDefinitionMap.put("/userinfo/userAdd", "authc,perms[\"userinfo:view\"],roles[\"redhat\"]");
+            //4.登录过的不拦截
+            filterChainDefinitionMap.put("/**", "user");
+            shiroFilterFactoryBean.setFilterChainDefinitionMap(filterChainDefinitionMap);
+        }
+/*
+        *//**
+         * 权限认证
+         * 需要开启Shiro AOP注解支持
+         * @RequiresPermissions({"userinfo:view"})
+         * @RequiresRoles({"wangjing"})等注解的支持
+         * @param securityManager
+         * @return
+         *//*
+        @Bean
+        public AuthorizationAttributeSourceAdvisor getAuthorizationAttributeSourceAdvisor(@Qualifier("securityManager") DefaultWebSecurityManager securityManager) {
+            AuthorizationAttributeSourceAdvisor aasa = new AuthorizationAttributeSourceAdvisor();
+            aasa.setSecurityManager(securityManager);
+            return aasa;
+        }*/
+        /**
+         * 当用户无权限访问403页面而不抛异常，默认shiro会报UnauthorizedException异常
+         * @return
+         */
+    /*    @Bean
+        public SimpleMappingExceptionResolver resolver() {
+            SimpleMappingExceptionResolver resolver = new SimpleMappingExceptionResolver();
+            Properties properties = new Properties();
+            properties.setProperty("org.apache.shiro.authz.UnauthorizedException", "/403");
+            resolver.setExceptionMappings(properties);
+            return resolver;
+        }*/
 }

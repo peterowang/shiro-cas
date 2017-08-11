@@ -21,15 +21,10 @@ public class HomeController {
     public String index() {
         return "index";
     }
-    @RequestMapping(value="/login",method= RequestMethod.GET)
-    public String loginForm(Model model){
-//      return "login";
-        return "redirect:" + ShiroConfiguration.loginUrl;
-    }
+
     /**
      * shiroFilterFactoryBean.setLoginUrl(loginUrl);我们设置了登录地址，但没设置logout,
      * 所以加一个logout的请求，转到cas的logout上
-     * @param session
      * @return
      */
     @RequestMapping(value = "logout", method = { RequestMethod.GET,
